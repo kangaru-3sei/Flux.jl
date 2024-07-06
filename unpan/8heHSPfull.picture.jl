@@ -4,12 +4,13 @@ begin
     using LinearAlgebra
     using Plots
     using JLD2
-    using PyCall
+    #using PyCall
     using Printf
 end
 
 
 #include("C:/Users/chikk/OneDrive - Kyoto University/analysis/GCM_analysis.jl")
+cd("unpan")
 begin
     #入力してね
     diry = "8he.ver6"
@@ -18,7 +19,7 @@ begin
     @load "./$diry/coor$diry.jld2" HR gate
     N = size(H,1)
     coord = HR
-    include("C:/Users/chikk/OneDrive - Kyoto University/analysis/GCM_analysis_func.jl")
+    include("GCM_analysis_func.jl")
     c = GCM_keisu(evol,Hvec_trn,norvec)
 end
 
@@ -217,10 +218,13 @@ begin
     end
 end
 
-
+gate
 #subspaceとのオーバーラップ。subspaceでのnatural basisとj th state in full spaceとのオーバーラップの値を出力 
 #inputはgate:subspace指定 のみ。
 calcu_subovl(gate)
+calcu_subovl(gate6he)
+gatemicro,count = cluster_distance_cutoff_8he(0.2)
+calcu_subovl(gatemicro)
 
 #gateから指定したRのみをさらに絞り込むゲートを返す
 function gateRtrncate(gate::BitVector, coord, R)  
@@ -516,6 +520,7 @@ ovlp6he = ovlp_wsub_osub(H,ol, gate6he, gate6he, trn)
     coord[:,1]
 function cluster_distance_cutoff_8he(r,Ntot=N,gate3=gate)
     gatekyori = trues(Ntot)
+    count = length(gate3) + 24
     for i in eachindex(gate3)
         if gate3[i] == true
             R = coord[i,1]
@@ -530,21 +535,24 @@ function cluster_distance_cutoff_8he(r,Ntot=N,gate3=gate)
             kyori_α2n = sqrt((zα-z2)^2+(xα-x2)^2)
             if kyori_α2n >= r && R1 >= r
                 gatekyori[i] = false
+                count -= 1
             end
         else 
             gatekyori[i] = false
+            count -= 1
         end
 
         #6he+2n配位
             gate6he = .!gate
             gate6he[1] = false
-            gatekyori = gatekyori .| gate6he
+            #gatekyori = gatekyori .| gate6he
     end
-    return gatekyori
+    return gatekyori, count
 end
     #12Cの場合
     function cluster_distance_cutoff_12C(r,Ntot=N,gate3=gate,zahyo=coord)
         gatekyori = trues(Ntot)
+        count = length(gate3)
         for i in eachindex(gate3)
             if gate3[i] == true
                 R = coord[i,1]
@@ -557,16 +565,18 @@ end
                 z1 = 2/3*R2*cos(θ)
                 z2 = (0.50*R1-1/3*R2*cos(θ))
                 kyori_2α = sqrt((x-x1)^2+(z1-z2)^2)
-                if kyori_2α >= r && R1 >= r
+                if kyori_2α ≥ r && R1 ≥ r
                     gatekyori[i] = false
+                    count = count - 1
                 end
             else 
                 gatekyori[i] = false
+                count = count - 1
             end
         end
-        return gatekyori
+        return gatekyori, count
     end    
-sub2dis = cluster_distance_cutoff_8he(2)
+sub2dis, count = cluster_distance_cutoff_8he(6)
 calcu_subovl(sub2dis)
 resall = Vector{Vector{Float64}}()
 for R in 1:12
@@ -615,6 +625,68 @@ for i in 1:2    #i th 固有状態　of Ψfull
     savefig(q,outputgentle)
     display(q)
 end
+
+#クラスター距離に応じたサブスペースとのオーバーラップを見る
+#12Cの場合
+resall = Vector{Vector{Float64}}()
+darray = Float64[]
+dmax = 6
+dmin = 0.05
+d = dmin
+while d ≤ dmax 
+    dgate, count = cluster_distance_cutoff_8he(d)
+    resvec = calcu_subovl(dgate)
+    push!(resall, resvec)
+    push!(darray, d)
+    if d ≤ 2
+        d = d + 0.1
+    else
+        d = d + 0.5
+    end
+end
+resall[20]
+for i in 1:2    #i th 固有状態　of Ψfull
+    p = plot(yrange=(0,1.0), xticks=(0.0:1.0:13.0),title="sqrd. ovlp. of st$i with subspace cut by 2n-2n distance", xlabel="dineutron distance (fm)")
+    output = joinpath(diry, "ovlp.2cluster.distance.subspacest$(i).png")
+    line1 = Float64[]
+    yoko = darray
+    
+    for j in axes(resall,1)
+        res = resall[j][i]
+        push!(line1, res)
+    end
+    plot!(p, yoko, line1, type=:scatter, markershapes=:circle, label="",legendfontsize = 15, tickfontsize = 15)
+    # 各点の隣にその値を書く
+    for j in axes(resall,1)
+        offset = 0.05 # オフセットの値を調整する
+        annotate!(p, yoko[j], line1[j] + offset, text(string(round(line1[j], digits=3)), 8))
+    end
+    savefig(p,output)
+    display(p)
+
+    #Hで対角化した各状態とのovlpの和をとる
+    if i==1 #出力の絵を１枚にする。
+        global q = plot(yrange=(0,1.0),xticks=(0.0:1.0:13.0),title="sqrd. ovlp. with subspace cut by 2n-2n distance", xlabel="dineutron distance (fm)")
+        global r = plot(yrange=(0,1.0),xticks=(0.0:1.0:13.0),title="sqrd. ovlp. with subspace cut by 2n-2n distance", xlabel="dineutron distance (fm)")
+        labelname = "g.s."
+    else 
+        labelname = "2nd"
+    end
+    outputgentle = joinpath(diry, "ovlp.2cluster.distance.subspace.yasashi.png")
+    output = joinpath(diry, "ovlp.2cluster.distance.subspace.png")
+    plot!(q, yoko, line1, type=:scatter, markershapes=:circle, label=labelname, legendfontsize = 15, tickfontsize = 15)
+    plot!(r, yoko, line1, type=:scatter, markershapes=:circle, label=labelname, legendfontsize = 15, tickfontsize = 15, labelfontsize=15)
+    savefig(r, output)
+    for j in axes(darray,1)
+        offset = 0.05 # オフセットの値を調整する
+        annotate!(q, yoko[j], line1[j] + offset, text(string(round(line1[j], digits=3)), 8))
+    end
+    savefig(q,outputgentle)
+    display(q)
+end
+
+
+
 
 #R<=10配位
 Rtrn = 10
